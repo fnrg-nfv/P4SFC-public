@@ -1,0 +1,105 @@
+// This is protobuf file for gRPC between servers (state library) and controller.
+// Controller need to obtian top-K matched states periodically.
+
+syntax = "proto3";
+
+package P4SFCState;
+
+// The greeting service definition.
+service RPC {
+  // Sends a greeting for test
+  rpc SayHello (HelloRequest) returns (HelloReply) {}
+
+  rpc GetState (Empty) returns (TableEntryReply) {}
+
+  rpc GetNewState (Empty) returns (TableEntryReply) {}
+}
+
+
+// The request message containing the user's name.
+message HelloRequest {
+  string name = 1;
+}
+
+// The response message containing the greetings
+message HelloReply {
+  string message = 1;
+}
+
+message Empty{ }
+
+message TableEntryReply {
+  int32 click_instance_id = 1;
+  int32 window_cur_pos= 2;
+  repeated TableEntry entries = 3;
+}
+
+message TableEntry {
+  // uint32 table_id = 1;
+  // table name
+  bytes table_name = 1;
+  repeated FieldMatch match = 2;
+  Action action = 3;
+  // Should only be set if the match implies a TCAM lookup, i.e. at least one of
+  // the match fields is Optional, Ternary or Range.  A higher number indicates
+  // higher priority.  Only a highest priority entry that matches the packet
+  // must be selected.  Multiple entries in the same table with the same
+  // priority value are permitted.  See Section "TableEntry" in the
+  // specification for details of the behavior.
+  int32 priority = 4;
+  // Metadata (cookie) opaque to the target. There is no requirement of where
+  // this is stored, as long as it is returned with the rest of the entry in
+  // a Read RPC. This is deprecated in favor of the more flexible metadata
+  // field.
+  SlidingWindow window = 5;
+  // MeterConfig meter_config = 6;
+  // CounterData counter_data = 7;
+}
+
+message SlidingWindow {
+  repeated int64 slot = 1;
+}
+
+message FieldMatch {
+  string field_name = 1;
+
+  // Matches can be performed on arbitrarily-large inputs; the protobuf type
+  // 'bytes' is used to model arbitrarily-large values.
+  message Exact {
+    bytes value = 1;
+  }
+  message Ternary {
+    bytes value = 1;
+    bytes mask = 2;
+  }
+
+  oneof field_match_type {
+    Exact exact = 2;
+    Ternary ternary = 3;
+    // TODO: only exact is supported currently. 
+  }
+}
+
+// message TableAction {
+//   oneof type {
+//     Action action = 1;
+//     // uint32 action_profile_member_id = 2;
+//     // uint32 action_profile_group_id = 3;
+//     // ActionProfileActionSet action_profile_action_set = 4;
+//   }
+// }
+
+message Action {
+  string action = 1;
+  message Param {
+    // param may not be needed. it is determined by action and never changed.
+    string param = 2;
+    bytes value = 3;
+  }
+  // uint32 action_id = 1;
+  // message Param {
+  //   uint32 param_id = 2;
+  //   bytes value = 3;
+  // }
+  repeated Param params = 4;
+}
