@@ -30,6 +30,6 @@ network.)
 
 1. [Configure a server and run a server daemon.](./nf_server/README.md)
 1. [Configure a switch and run a switch controller.](./switch/README.md)
-1. Run the orchestrator in the same server for convenience, and send a
+1. [Run the orchestrator](./orchestrator/README.md) in the same server for convenience, and send a
 request to the orchestrator to deploy an SFC. (You can also configure it in
 another server in the same management network.)
