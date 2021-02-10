@@ -3,81 +3,35 @@ from flask import Flask, request, jsonify
 import requests
 import json
 import time
-import os
-import sys
 
-# Import P4Runtime lib from parent utils dir
-# Probably there's a better way of doing this.
-sys.path.append(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), '../utils/'))
-import const
-
-# 理论上，在orchestrator中应该维护这样一个全局网络信息
-# 用户的请求只会说明希望把什么网络功能运行在什么server上
-# 以及这个sfc的route是什么，即会流过哪些交换机
-# 然后orchestrator就可以根据用户的信息以及拓扑信息解析出
-# 需要的路由信息并配置到交换机上。
-# 这个工作繁琐且没有难度，只是需要大量的时间，所以暂时不写！
-# network = {
-#     "servers": {
-#         "server 1": {
-#             "daemon_addr": "http://10.149.252.25:8090"
-#         },
-#         "server 2": {
-#             "daemon_addr": "http://10.149.252.24:8090"
-#         },
-#         .....
-#     },
-#     "switches": {
-#         "ingress": {
-#             "control_plane_addr": "http://10.149.252.20:8090"
-#         },
-#         "switch 1": {
-#             "control_plane_addr": "http://10.149.252.66:8090"
-#         },
-#         ...
-#     }
-#     "linkd": {
-#         "switch 1-port 1-ingress-port-2",
-#         "switch 1-port 2-server 1",
-#         "switch 1-port 3-server 2",
-#         ...
-#     }
-# }
-
-
-def addr2dec(addr):
-    "将点分十进制IP地址转换成十进制整数"
-    items = [int(x) for x in addr.split(".")]
-    return sum([items[i] << [24, 16, 8, 0][i] for i in range(4)])
-
-
-def dec2addr(dec):
-    "将十进制整数IP转换成点分十进制的字符串IP地址"
-    return ".".join([str(dec >> x & 0xff) for x in [24, 16, 8, 0]])
-
-
-app = Flask(__name__)
-
-chain_id = 0
-
-# below is very simplified version,
-# but is enough for evaluation!
+# Simplified version that is enough for evaluation!
 topo = {"switch 1": "server 1"}
 
 addr_list = {
     "switch 1": "http://10.176.35.32:8090",
-    "server 1": "http://localhost:8091"
+    "server 1": "http://10.176.35.14:8090"
 }
 
 headers = {'Content-Type': 'application/json'}
 
 nf_offlodability = {
-    "Monitor": const.OFFLOADABLE,
-    "Firewall": const.OFFLOADABLE,
-    "IPRewriter": const.PARTIAL_OFFLOADABLE,
-    "IPS": const.UN_OFFLOADABLE
+    "L3 Forwader": 0, # fully offloadable
+    "Firewall": 0, 
+    "NAT": 1, # partially offloadable
+    "Load Balancer": 1,
+    "IPS": 2 # non-offloadable
 }
+
+chain_id = 0
+app = Flask(__name__)
+
+def addr2dec(addr):
+    items = [int(x) for x in addr.split(".")]
+    return sum([items[i] << [24, 16, 8, 0][i] for i in range(4)])
+
+
+def dec2addr(dec):
+    return ".".join([str(dec >> x & 0xff) for x in [24, 16, 8, 0]])
 
 
 def parse_chain(chain_desc):
@@ -110,11 +64,7 @@ def parse_chain(chain_desc):
 def get_connected_server(switch):
     return topo[switch]
 
-
 def parse_route(chain_route, nf_groups, chain_id, chain_length):
-    """Very simplified version !
-    Assuming that a switch only connects to one server
-    """
     route_infos = {}
     for switch in chain_route:
         if switch != "egress" and switch != "ingress":
@@ -125,7 +75,7 @@ def parse_route(chain_route, nf_groups, chain_id, chain_length):
             route_infos[switch] = {
                 "chain_id": chain_id,
                 "chain_length": chain_length,
-                "output_port": 0  # 硬编码一下，本来应该根据拓扑决定
+                "output_port": 0
             }
     return route_infos
 
@@ -190,30 +140,4 @@ def deploy_chain():
 
 
 if __name__ == '__main__':
-
-    # user request example
-    app.run(host="0.0.0.0", port='8092', debug=True)
-
-    # User request example
-    {
-        "chain_desc": [{
-            "name": "Monitor",
-            "click_config": {
-                "param1": "abc"
-            },
-            "location": "server 1"
-        }, {
-            "name": "Firewall",
-            "click_config": {
-                "param1": "abc"
-            },
-            "location": "server 1"
-        }, {
-            "name": "IPS",
-            "location": "server 1"
-        }, {
-            "name": "IPRewriter",
-            "location": "server 1"
-        }],
-        "route": ["ingress", "switch 1", "egress"]
-    }
+    app.run(host="0.0.0.0", port='8092')
