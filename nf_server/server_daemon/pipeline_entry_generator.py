@@ -1,16 +1,7 @@
 import argparse
-import grpc
+import lib.const as const
 
-import os
-import sys
-# Import P4Runtime lib from parent utils dir
-# Probably there's a better way of doing this.
-sys.path.append(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), '../utils/'))
-
-import const
-
-element_p4_id = {"IPRewriter": 0, "Monitor": 1, "Firewall": 2, "VPN": 3}
+element_p4_id = {"IPRewriter": 0, "IPFilter": 1, "IPClassifier": 2}
 
 
 class NF:
@@ -40,20 +31,6 @@ class SFC:
         self.chain_length = chain_length
         self.chain_head = self.build_SFC(NFs)
         self.divide_chain()
-        if self.pre_host_chain_head is not None:
-            print "pre_host_chain head is %s" % self.pre_host_chain_head.name
-        else:
-            print "pre_host_chain is None"
-
-        if self.host_chain_head is not None:
-            print "host_chain head is %s" % self.host_chain_head.name
-        else:
-            print "host_chain is None"
-
-        if self.post_host_chain_head is not None:
-            print "post_host_chain head is %s" % self.post_host_chain_head.name
-        else:
-            print "post_host_chain is None"
 
         self.assign_stage_index()
 
@@ -67,15 +44,15 @@ class SFC:
 
     def divide_chain(self):
         """ Divide chain into three parts:
-        pre_host_chain: NFs that before the first un-offloaedable NF in the chain
-        host_chain: NFs between the first un-offloaedable NF and the last un-offloaedable NF in the chain
-        post_host_chain: NFs that after the last un-offloaedable NF in the chain.
+        pre_part: NFs that before the first un-offloaedable NF in the chain
+        middle_part: NFs between the first un-offloaedable NF and the last un-offloaedable NF in the chain
+        post_part: NFs that after the last un-offloaedable NF in the chain.
         For programming convenience, the interval is [ )
         """
         if self.chain_head.offloadability == const.OFFLOADABLE or self.chain_head.offloadability == const.PARTIAL_OFFLOADABLE:
-            self.pre_host_chain_head = self.chain_head
+            self.pre_part_head = self.chain_head
         else:
-            self.pre_host_chain_head = None
+            self.pre_part_head = None
 
         # step to the host_chain head
         cur_nf = self.chain_head
@@ -84,37 +61,37 @@ class SFC:
                 or cur_nf.offloadability == const.PARTIAL_OFFLOADABLE):
             cur_nf = cur_nf.next_nf
 
-        self.pre_host_chain_tail = cur_nf
-        self.host_chain_head = cur_nf
+        self.pre_part_tail = cur_nf
+        self.middle_part_head = cur_nf
 
         # set default value
-        self.host_chain_tail = None
-        self.post_host_chain_head = None
-        self.post_host_chain_tail = None
+        self.middle_part_tail = None
+        self.post_part_head = None
+        self.post_part_tail = None
 
         # step to the end of the chain to find
-        # the post_host_chain_head
+        # the post_part_head
         while cur_nf is not None:
             if cur_nf.offloadability == const.UN_OFFLOADABLE:
-                self.host_chain_tail = cur_nf.next_nf
-                self.post_host_chain_head = cur_nf.next_nf
+                self.middle_part_tail = cur_nf.next_nf
+                self.post_part_head = cur_nf.next_nf
             cur_nf = cur_nf.next_nf
 
     def assign_stage_index(self):
-        """Assign stage index to pre_host_chain and post_host_chain
+        """Assign stage index to pre_part and post_part
         By using stage_index, we can now which stage to config when operating on table entry
         """
-        if self.pre_host_chain_head is not None:
+        if self.pre_part_head is not None:
             stage_index = 0
-            cur_nf = self.pre_host_chain_head
-            while cur_nf != self.pre_host_chain_tail:
+            cur_nf = self.pre_part_head
+            while cur_nf != self.pre_part_tail:
                 cur_nf.stage_index = stage_index
                 stage_index = stage_index + 1
                 cur_nf = cur_nf.next_nf
 
-        if self.post_host_chain_head is not None:
+        if self.post_part_head is not None:
             stage_index = 0
-            cur_nf = self.pre_host_chain_head
+            cur_nf = self.pre_part_head
             while cur_nf is not None:
                 cur_nf.stage_index = stage_index
                 stage_index = stage_index + 1
@@ -143,13 +120,13 @@ def generate_element_control_entries(head_nf, tail_nf, chain_id):
             "match_fields": {
                 "hdr.sfc.chainId": chain_id,
                 "meta.curNfInstanceId": cur_nf.id,
-                "meta.stageId": 0  # now assume every NF has only one stage! need to extent!
+                "meta.stageId": 0
             },
             "action_name": action_name,
             "action_params": {
                 "elementId": element_p4_id[cur_nf.name],
                 "nextStage": nextStage,
-                "isNFcomplete": 1  # Constant. the reason is the saem as meta.stageId
+                "isNFcomplete": 1
             }
         }
         element_control_entries.append(table_entry)
@@ -172,8 +149,8 @@ def generate_forward_control_entries(sfc):
     chain_length = sfc.chain_length
     chain_id = sfc.id
     forwarding_entries = []
-    if sfc.pre_host_chain_head is not None:
-        while cur_nf != sfc.pre_host_chain_tail:
+    if sfc.pre_part_head is not None:
+        while cur_nf != sfc.pre_part_tail:
             # build forward rule for each nf in the pre_host
             table_entry = {
                 "table_name": "MyIngress.forwardControl.chainId_exact",
@@ -199,8 +176,8 @@ def generate_forward_control_entries(sfc):
     }
     forwarding_entries.append(table_entry)
 
-    # step to the post_host_chain_head
-    while cur_nf != sfc.post_host_chain_head:
+    # step to the post_part_head
+    while cur_nf != sfc.post_part_head:
         cur_nf = cur_nf.next_nf
         chain_length = chain_length - 1
 
@@ -225,11 +202,11 @@ def generate_entries(sfc):
     entries = []
 
     entries.extend(
-        generate_element_control_entries(sfc.pre_host_chain_head,
-                                         sfc.pre_host_chain_tail, sfc.id))
+        generate_element_control_entries(sfc.pre_part_head,
+                                         sfc.pre_part_tail, sfc.id))
     entries.extend(
-        generate_element_control_entries(sfc.post_host_chain_head,
-                                         sfc.post_host_chain_tail, sfc.id))
+        generate_element_control_entries(sfc.post_part_head,
+                                         sfc.post_part_tail, sfc.id))
 
     entries.extend(generate_forward_control_entries(sfc))
 
