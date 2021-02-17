@@ -1,11 +1,7 @@
 # P4SFC
 
 A Service Function Chain(SFC) project led by Fudan Future Network Research
-Group(FNRG).
-
-## Overview
-
-This project leverages P4 switch to accelerate software-based network
+Group(FNRG). This project leverages P4 switch to accelerate software-based network
 function chains. It offloads proper NFs inside an SFC to reduce the packet
 processing latency and increase the throughput for corresponding network
 flows.
